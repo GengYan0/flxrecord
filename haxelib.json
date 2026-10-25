@@ -1,0 +1,16 @@
+{
+	"name": "flxrecord",
+	"url": "https://github.com/GengYan0/flxrecord",
+	"license": "MIT",
+	"tags": ["flixel", "openfl", "recording", "video", "replay", "screenshot"],
+	"description": "Frame-accurate recorder and instant-replay buffer for HaxeFlixel, with PNG-sequence and ffmpeg output.",
+	"version": "0.1.0",
+	"classPath": ".",
+	"releasenote": "First cut: recorder, replay buffer, PNG sequence sink, ffmpeg mux helper.",
+	"contributors": ["RainyEngine"],
+	"dependencies": {
+		"flixel": "",
+		"openfl": "",
+		"lime": ""
+	}
+}
