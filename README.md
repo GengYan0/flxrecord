@@ -7,7 +7,7 @@
 
 | 能力 | 入口 |
 |---|---|
-| 按目标帧率录制 | `FlxRecorder(fps, scale)` |
+| 按目标帧率录制 | `FlxRecorder.fps` / `FlxRecorder.scale` |
 | 输出到自定义写入端 | `FrameSink` 接口 |
 | 内置 PNG/JPEG 序列写入端 | `sinks.SequenceSink` |
 | 最近 N 秒环形缓冲 | `FlxReplay(seconds, fps, quality)` |
@@ -31,6 +31,7 @@ haxelib git flxrecord https://github.com/GengYan0/flxrecord
 
 ```haxe
 import flxrecord.FlxRecorder;
+import flxrecord.sinks.ImageFormat;
 import flxrecord.sinks.SequenceSink;
 
 var sink = new SequenceSink('out/rec01', ImageFormat.PNG, 0.9, 'frame_');
@@ -45,8 +46,12 @@ rec.stop();
 trace('captured ${rec.captured} frames');
 ```
 
-`rec.recording` 给出当前状态。`fps` 只决定多久采样一帧：游戏跑 240 fps 时按 30 fps
-输出会隔帧取样，逻辑一帧不跳；游戏只有 30 fps 时要 60 fps 就复制帧。
+`rec.recording` 给出当前状态。`fps` 与 `scale` 在 `start()` 时锁定：写入端的尺寸和帧率是
+`open()` 一次给定的，录到一半改这两个值只会影响下一次开录。
+
+`fps` 只决定多久采样一帧：游戏跑 240 fps 时按 30 fps 输出会隔帧取样，逻辑一帧不跳；
+游戏掉到 30 fps 以下时同一张画面会被重复写出，序列的时间轴与真实时间对齐，不会因为
+卡顿把整段视频压短。单次绘制最多补 `maxBurstFrames` 帧，超过的部分丢弃。
 
 ## 合成视频
 
@@ -69,7 +74,10 @@ import flxrecord.FlxReplay;
 
 var replay = new FlxReplay(15, 30, 0.85);   // 15 秒，30 fps，JPEG 质量 0.85
 
-replay.active = true;
+// 接一个录制器把帧灌进来，见下面的「录制一段画面」
+var rec = new FlxRecorder(replay);
+rec.scale = 0.75;
+rec.start();
 
 // 保存成一串图片
 var sink = replay.dump('out/replay');
@@ -79,13 +87,16 @@ var path = replay.save('out/replay', 'audio/track.ogg', 'out/replay.mp4');
 ```
 
 `replay.seconds` 与 `replay.fps` 可以随时改，缓冲会按新尺寸重建。`replay.clear()` 清空。
+`dump()` 的第二个参数用来指定音轨，不传则用 `replay.audioPath`。
 
 ## 自己写写入端
 
-`sink` 收到的是已经拷好的 `BitmapData`，所以可以在主线程拿住引用、丢给别的线程编码。
+`sink.write()` 拿到的是录制器自己的暂存 `BitmapData`，下一帧会被覆盖。要留住像素，
+在 `write()` 里就地编码，或者 `clone()` 一份再交给别的线程。
 
 ```haxe
 import flxrecord.FrameSink;
+import openfl.display.BitmapData;
 
 class NullSink implements FrameSink
 {
@@ -102,17 +113,18 @@ class NullSink implements FrameSink
 }
 ```
 
-```haxe
-var rec = new FlxRecorder(new NullSink());
-```
-
 `open` 拿到输出尺寸与帧率，`write` 的 `index` 从 0 递增，`close` 在 `stop()` 时调用。
 
 ## 单帧截图
 
 ```haxe
-var shot = FlxRecorder.screenshot();
-shot.encode(PNG, 'out/shot.png');
+var shot = FlxRecorder.screenshot();   // 返回 BitmapData，用完自己 dispose()
+if (shot != null)
+{
+	final png = shot.encode(shot.rect, new PNGEncoderOptions());
+	shot.dispose();
+	sys.io.File.saveBytes('out/shot.png', cast png);
+}
 ```
 
 不传 `camera` 时截当前主相机，截出来的内容与玩家看到的一致（含 HUD 与着色器效果）。
@@ -120,12 +132,16 @@ shot.encode(PNG, 'out/shot.png');
 ## 接入时机
 
 `FlxRecorder` 自己订阅 `FlxG.signals.postDraw`，所以只在该录制的状态里构造它即可，
-用完 `stop()`。空闲时它不采样，开销可以忽略；正在录时每一帧都要拷一份位图并落盘，
-这部分不能白付。
+用完 `stop()`。`stop()` 只停采集，录制器还能再 `start()`；彻底不要了调 `destroy()`，
+它先 `stop()` 再松开 `sink`/`camera`/`source` 的引用。
+
+空闲时它不采样，开销可以忽略；正在录时每一帧都要拷一份位图并落盘，这部分不能白付。
 
 ## 边界
 
 - 输出帧率与游戏帧率解耦，但采样点固定在 `postDraw`，录不到 `postDraw` 之后的改动。
-- `SequenceSink` 每帧一个文件，长时间录制会占大量磁盘。
+- `SequenceSink` 每帧一个文件，长时间录制会占大量磁盘。同一目录重复录制会覆盖同名帧，
+  `manifest.json` 里的 `frames` 只统计本次写入。
 - `VideoExport` 只做封装，不做编码参数调优；要控制码率得自己写 ffmpeg 命令行。
 - 录制期间 `BitmapData` 拷贝开销随 `scale` 的平方增长。
+- `FlxReplay` 存的是 JPEG 字节，缓冲占用只与 `seconds * fps * 单帧大小` 有关。

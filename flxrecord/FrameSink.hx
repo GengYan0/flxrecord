@@ -5,8 +5,9 @@ import openfl.display.BitmapData;
 /**
  * Where captured frames go.
  *
- * A sink is called on the main thread with a `BitmapData` that is already a private copy,
- * so it may keep the reference (nobody else touches it afterwards).
+ * A sink is called on the main thread with the recorder's own scratch `BitmapData`. The same
+ * instance is overwritten by the next frame, so a sink that wants to keep pixels has to
+ * `clone()` them or encode them before returning.
  */
 interface FrameSink
 {

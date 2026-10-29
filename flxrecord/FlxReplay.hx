@@ -1,12 +1,10 @@
 package flxrecord;
 
-import flixel.FlxG;
+import flxrecord.sinks.ImageFormat;
 import flxrecord.sinks.SequenceSink;
 import haxe.io.Bytes;
 import openfl.display.BitmapData;
 import openfl.display.JPEGEncoderOptions;
-import sys.FileSystem;
-import sys.io.File;
 
 /**
  * Keeps the last few seconds of gameplay in memory so a highlight can be saved after it happened.
@@ -42,6 +40,7 @@ class FlxReplay implements FrameSink
 	var _width:Int = 0;
 	var _height:Int = 0;
 	var _encoder:JPEGEncoderOptions;
+	var _encoderQuality:Int = -1;
 
 	public function new(?seconds:Float = 10, ?fps:Float = 30, ?quality:Float = 0.85)
 	{
@@ -55,7 +54,6 @@ class FlxReplay implements FrameSink
 		_width = width;
 		_height = height;
 		this.fps = fps;
-		_encoder = new JPEGEncoderOptions(Std.int(quality * 100));
 		clear();
 		active = true;
 	}
@@ -65,9 +63,7 @@ class FlxReplay implements FrameSink
 		if (frame == null || !active)
 			return;
 
-		// A fresh encoder per frame is cheap next to the encode itself, and it keeps the
-		// quality changeable at runtime without rebuilding the buffer.
-		final bytes:Bytes = cast frame.encode(frame.rect, _encoder != null ? _encoder : new JPEGEncoderOptions(Std.int(quality * 100)));
+		final bytes:Bytes = cast frame.encode(frame.rect, encoder());
 
 		if (bytes == null)
 			return;
@@ -112,37 +108,29 @@ class FlxReplay implements FrameSink
 	/**
 	 * Writes the buffered frames to `dir` in the same layout `SequenceSink` uses, so the
 	 * result can be muxed by `VideoExport`.
+	 *
+	 * @param	dir		Target folder.
+	 * @param	audio	Track to record in the manifest; falls back to `audioPath`.
 	 */
-	public function dump(dir:String):SequenceSink
+	public function dump(dir:String, ?audio:String):SequenceSink
 	{
 		if (_filled == 0)
 			return null;
 
 		final sink = new SequenceSink(dir, JPG, quality);
-		sink.audioPath = audioPath;
+		sink.audioPath = audio != null ? audio : audioPath;
 		sink.open(_width, _height, fps);
 
 		// Oldest frame first, starting right after the next write slot.
 		final start = _filled == _ring.length ? _next : 0;
 		for (i in 0..._filled)
 		{
-			final index = (start + i) % _ring.length;
-			final bytes = _ring[index];
-			if (bytes == null)
-				continue;
-			File.saveBytes(sink.framePath(i), bytes);
+			final bytes = _ring[(start + i) % _ring.length];
+			if (bytes != null)
+				sink.writeEncoded(i, bytes);
 		}
 
-		// The manifest has to report the real frame count, not the placeholder.
-		File.saveContent(sink.dir + '/manifest.json', haxe.Json.stringify({
-			width: _width,
-			height: _height,
-			fps: fps,
-			frames: _filled,
-			format: 'jpg',
-			audio: audioPath
-		}, '  '));
-
+		sink.close();
 		return sink;
 	}
 
@@ -152,15 +140,28 @@ class FlxReplay implements FrameSink
 	 */
 	public function save(dir:String, ?audio:String, ?out:String):String
 	{
-		final sink = dump(dir);
+		final track = audio != null ? audio : audioPath;
+		final sink = dump(dir, track);
 		if (sink == null)
 			return null;
 
-		if (audio != null)
-			sink.audioPath = audio;
-
 		final target = out != null ? out : sink.dir + '/replay.mp4';
-		return VideoExport.mux(sink, sink.audioPath, target) ? target : null;
+		return VideoExport.mux(sink, track, target) ? target : null;
+	}
+
+	/**
+	 * `JPEGEncoderOptions` is rebuilt only when `quality` actually moves; `qualityInt()` is
+	 * the same rounding `SequenceSink` uses.
+	 */
+	function encoder():JPEGEncoderOptions
+	{
+		final q = Std.int(Math.max(1, Math.min(100, quality * 100)));
+		if (_encoder == null || _encoderQuality != q)
+		{
+			_encoder = new JPEGEncoderOptions(q);
+			_encoderQuality = q;
+		}
+		return _encoder;
 	}
 
 	function ensureCapacity():Void

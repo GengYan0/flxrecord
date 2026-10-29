@@ -1,10 +1,8 @@
 package flxrecord;
 
 import flxrecord.sinks.SequenceSink;
-import haxe.io.Bytes;
 import sys.FileSystem;
 import sys.io.File;
-import sys.io.Process;
 
 /**
  * Turns a captured sequence into a video, using an ffmpeg binary if one is available.
@@ -48,16 +46,18 @@ class VideoExport
 
 		final target = out != null ? out : sink.dir + '/video.mp4';
 		final audioTrack = audio != null ? audio : sink.audioPath;
+		final hasAudio = audioTrack != null && FileSystem.exists(audioTrack);
 
 		final args = new StringBuf();
 		args.add('-y -framerate ' + manifestFps(sink));
 		args.add(' -i ' + quote(sink.inputPattern()));
 
-		if (audioTrack != null && FileSystem.exists(audioTrack))
+		if (hasAudio)
 			args.add(' -i ' + quote(audioTrack));
 
 		args.add(' -c:v libx264 -pix_fmt yuv420p -preset veryfast');
-		if (audioTrack != null && FileSystem.exists(audioTrack))
+
+		if (hasAudio)
 			args.add(' -c:a aac -shortest');
 
 		args.add(' ' + quote(target));
@@ -77,7 +77,17 @@ class VideoExport
 		if (!FileSystem.exists(dir + '/manifest.json'))
 			return false;
 
-		final data:Dynamic = haxe.Json.parse(File.getContent(dir + '/manifest.json'));
+		final data:Dynamic = try
+		{
+			haxe.Json.parse(File.getContent(dir + '/manifest.json'));
+		}
+		catch (e:Dynamic)
+		{
+			null;
+		};
+
+		if (data == null || data.fps == null)
+			return false;
 
 		if (data.audio != null && audio == null)
 			audio = data.audio;
@@ -86,7 +96,7 @@ class VideoExport
 			return false;
 
 		final target = out != null ? out : dir + '/video.mp4';
-		final input = dir + '/frame_%05d.' + data.format;
+		final input = dir + '/frame_%05d.' + (data.format != null ? data.format : 'jpg');
 
 		final args = new StringBuf();
 		args.add('-y -framerate ' + data.fps);

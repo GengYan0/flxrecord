@@ -18,12 +18,24 @@ class FlxRecorder
 {
 	/**
 	 * Frames per second written to the sink.
+	 *
+	 * Latched by `start()`: the sink is opened with this rate and the sequence is described
+	 * by it, so a change during a take applies to the next one.
 	 */
 	public var fps(default, set):Float = 30;
 
 	/**
+	 * Upper bound on the frames written for a single draw when the game falls behind `fps`.
+	 * One draw can only produce one new image, so the extra frames are copies of it.
+	 */
+	public var maxBurstFrames:Int = 8;
+
+	/**
 	 * Resolution multiplier applied while copying. `0.5` records at half size, which is the
 	 * cheapest way to keep capture cost low at 60 fps.
+	 *
+	 * Latched by `start()`: the sink is opened with the size derived from this value, so a
+	 * change during a take applies to the next one.
 	 */
 	public var scale(default, set):Float = 1;
 
@@ -52,6 +64,8 @@ class FlxRecorder
 	var _accumulator:Float = 0;
 	var _width:Int = 0;
 	var _height:Int = 0;
+	var _activeFps:Float = 30;
+	var _step:Float = 1 / 30;
 
 	public function new(?sink:FrameSink, ?camera:FlxCamera)
 	{
@@ -80,16 +94,27 @@ class FlxRecorder
 		_width = Std.int(Math.max(1, target.width * scale));
 		_height = Std.int(Math.max(1, target.height * scale));
 
-		_frame = new BitmapData(_width, _height, false, 0xFF000000);
+		final frame = new BitmapData(_width, _height, false, 0xFF000000);
 		_matrix.a = _width / target.width;
 		_matrix.d = _height / target.height;
 
+		_activeFps = fps;
+		_step = 1 / fps;
 		accumulatorReset();
 		captured = 0;
-		recording = true;
 
-		this.sink.open(_width, _height, fps);
-		FlxG.signals.postDraw.add(onPostDraw);
+		try
+		{
+			this.sink.open(_width, _height, _activeFps);
+			FlxG.signals.postDraw.add(onPostDraw);
+			_frame = frame;
+			recording = true;
+		}
+		catch (error:Dynamic)
+		{
+			frame.dispose();
+			throw error;
+		}
 	}
 
 	/**
@@ -111,6 +136,17 @@ class FlxRecorder
 			_frame.dispose();
 			_frame = null;
 		}
+	}
+
+	/**
+	 * Drops the capture listener without closing the sink.
+	 */
+	public function destroy():Void
+	{
+		stop();
+		sink = null;
+		camera = null;
+		source = null;
 	}
 
 	/**
@@ -136,10 +172,11 @@ class FlxRecorder
 	 */
 	public static function screenshot(?camera:FlxCamera):BitmapData
 	{
-		final target:DisplayObject = camera != null ? camera.canvas : FlxG.camera.canvas;
-		if (target == null)
+		final cam = camera != null ? camera : FlxG.camera;
+		if (cam == null || cam.canvas == null)
 			return null;
 
+		final target = cam.canvas;
 		final shot = new BitmapData(Std.int(target.width), Std.int(target.height), false, 0xFF000000);
 		shot.draw(target);
 		return shot;
@@ -159,19 +196,33 @@ class FlxRecorder
 		if (!recording)
 			return;
 
-		final step = 1 / fps;
 		_accumulator += FlxG.elapsed;
 
-		if (_accumulator < step)
+		var due = 0;
+		while (_accumulator >= _step && due < maxBurstFrames)
+		{
+			_accumulator -= _step;
+			due++;
+		}
+
+		if (due == 0)
 			return;
 
-		// Never catch up with a burst after a hitch: the recording clock stays real-time,
-		// the frozen moment is simply shorter.
-		_accumulator -= step;
-		if (_accumulator > step)
+		// A stall longer than the burst cap is written off rather than padded with a long run
+		// of identical frames.
+		if (_accumulator >= _step)
 			accumulatorReset();
 
 		grab();
+
+		while (--due > 0)
+			writeRepeated();
+	}
+
+	function writeRepeated():Void
+	{
+		if (_frame != null && sink != null)
+			sink.write(_frame, captured++);
 	}
 
 	inline function accumulatorReset():Void

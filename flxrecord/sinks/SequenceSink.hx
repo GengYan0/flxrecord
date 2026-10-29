@@ -1,19 +1,14 @@
 package flxrecord.sinks;
 
-import flixel.FlxG;
 import flxrecord.FrameSink;
+import flxrecord.sinks.ImageFormat;
+import haxe.io.Bytes;
 import StringTools;
 import openfl.display.BitmapData;
 import openfl.display.JPEGEncoderOptions;
 import openfl.display.PNGEncoderOptions;
 import sys.FileSystem;
 import sys.io.File;
-
-enum ImageFormat
-{
-	PNG;
-	JPG;
-}
 
 /**
  * Writes every captured frame as its own image plus a `manifest.json` next to them.
@@ -37,6 +32,7 @@ class SequenceSink implements FrameSink
 	var _width:Int = 0;
 	var _height:Int = 0;
 	var _fps:Float = 30;
+	var _frames:Int = 0;
 
 	public function new(dir:String, ?format:ImageFormat, ?quality:Float = 0.9, ?prefix:String = 'frame_')
 	{
@@ -51,6 +47,7 @@ class SequenceSink implements FrameSink
 		_width = width;
 		_height = height;
 		_fps = fps;
+		_frames = 0;
 
 		makeDirs(dir);
 		writeManifest(0);
@@ -61,21 +58,31 @@ class SequenceSink implements FrameSink
 		if (frame == null)
 			return;
 
-		final path = framePath(index);
 		final bytes = switch (format)
 		{
 			case PNG: frame.encode(frame.rect, new PNGEncoderOptions());
-			case JPG: frame.encode(frame.rect, new JPEGEncoderOptions(Std.int(quality * 100)));
+			case JPG: frame.encode(frame.rect, new JPEGEncoderOptions(qualityInt()));
 		}
 
 		if (bytes != null)
-			File.saveBytes(path, cast bytes);
+			writeEncoded(index, cast bytes);
+	}
+
+	/**
+	 * Stores an image the caller has already encoded, so a second encode is not paid.
+	 */
+	public function writeEncoded(index:Int, bytes:Bytes):Void
+	{
+		if (bytes == null)
+			return;
+
+		File.saveBytes(framePath(index), bytes);
+		_frames++;
 	}
 
 	public function close():Void
 	{
-		final frames = FileSystem.exists(dir) ? countFrames() : 0;
-		writeManifest(frames);
+		writeManifest(_frames);
 	}
 
 	/**
@@ -99,15 +106,12 @@ class SequenceSink implements FrameSink
 		return dir + '/' + prefix + '%05d' + extension();
 	}
 
-	function countFrames():Int
+	/**
+	 * `JPEGEncoderOptions` takes 1..100; `quality` is a 0..1 ratio.
+	 */
+	public inline function qualityInt():Int
 	{
-		var n = 0;
-		for (file in FileSystem.readDirectory(dir))
-		{
-			if (StringTools.startsWith(file, prefix) && StringTools.endsWith(file, extension()))
-				n++;
-		}
-		return n;
+		return Std.int(Math.max(1, Math.min(100, quality * 100)));
 	}
 
 	function writeManifest(frames:Int):Void
