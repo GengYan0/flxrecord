@@ -51,7 +51,12 @@ trace('captured ${rec.captured} frames');
 
 `fps` 只决定多久采样一帧：游戏跑 240 fps 时按 30 fps 输出会隔帧取样，逻辑一帧不跳；
 游戏掉到 30 fps 以下时同一张画面会被重复写出，序列的时间轴与真实时间对齐，不会因为
-卡顿把整段视频压短。单次绘制最多补 `maxBurstFrames` 帧，超过的部分丢弃。
+卡顿把整段视频压短。单次绘制最多补 `maxBurstFrames` 帧，单次绘制最多计入
+`maxCatchUpSeconds` 秒，超过的部分丢弃。
+
+计时用的是 `haxe.Timer.stamp()` 的墙钟，不是 `FlxG.elapsed`：开了 `FlxG.fixedTimestep`
+之后后者是每次 update 的固定步长，游戏跟不上逻辑帧率时它会比真实时间慢，录出来的视频
+会比音轨短。
 
 ## 合成视频
 

@@ -31,6 +31,11 @@ class FlxRecorder
 	public var maxBurstFrames:Int = 8;
 
 	/**
+	 * Upper bound on the wall time a single draw may contribute to the output clock.
+	 */
+	public var maxCatchUpSeconds:Float = 0.25;
+
+	/**
 	 * Resolution multiplier applied while copying. `0.5` records at half size, which is the
 	 * cheapest way to keep capture cost low at 60 fps.
 	 *
@@ -59,9 +64,21 @@ class FlxRecorder
 	 */
 	public var captured(default, null):Int = 0;
 
+	/**
+	 * Draw calls seen since `start()`. `captured` can be lower when `fps` is below the draw
+	 * rate, and higher when the rate is above it.
+	 */
+	public var draws(default, null):Int = 0;
+
+	/**
+	 * Wall seconds the output clock has advanced since `start()`.
+	 */
+	public var clockSeconds(default, null):Float = 0;
+
 	var _frame:BitmapData;
 	var _matrix = new Matrix();
 	var _accumulator:Float = 0;
+	var _clock:Float = 0;
 	var _width:Int = 0;
 	var _height:Int = 0;
 	var _activeFps:Float = 30;
@@ -101,7 +118,10 @@ class FlxRecorder
 		_activeFps = fps;
 		_step = 1 / fps;
 		accumulatorReset();
+		_clock = haxe.Timer.stamp();
 		captured = 0;
+		draws = 0;
+		clockSeconds = 0;
 
 		try
 		{
@@ -196,7 +216,14 @@ class FlxRecorder
 		if (!recording)
 			return;
 
-		_accumulator += FlxG.elapsed;
+		final now = haxe.Timer.stamp();
+		var delta = now - _clock;
+		_clock = now;
+		draws++;
+		if (delta <= 0) return;
+		if (delta > maxCatchUpSeconds) delta = maxCatchUpSeconds;
+		clockSeconds += delta;
+		_accumulator += delta;
 
 		var due = 0;
 		while (_accumulator >= _step && due < maxBurstFrames)
@@ -208,8 +235,6 @@ class FlxRecorder
 		if (due == 0)
 			return;
 
-		// A stall longer than the burst cap is written off rather than padded with a long run
-		// of identical frames.
 		if (_accumulator >= _step)
 			accumulatorReset();
 
