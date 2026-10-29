@@ -21,7 +21,7 @@
 ```
 
 ```bash
-haxelib dev flxrecord "D:/libs/flxrecord"
+haxelib git flxrecord https://github.com/GengYan0/flxrecord
 ```
 
 依赖 `flixel` 6.2.0、`openfl` 9.5.2、`lime` 8.3.2。`VideoExport` 需要 `PATH` 上有
