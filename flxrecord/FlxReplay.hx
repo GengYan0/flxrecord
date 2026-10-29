@@ -7,11 +7,8 @@ import openfl.display.BitmapData;
 import openfl.display.JPEGEncoderOptions;
 
 /**
- * Keeps the last few seconds of gameplay in memory so a highlight can be saved after it happened.
- *
- * Frames are stored JPEG-encoded rather than raw: a 1080p RGBA frame is 8 MB, the same frame
- * as JPEG is around 150 KB, which is the difference between a 10-second buffer costing 2.4 GB
- * and costing 45 MB.
+ * Ring buffer of the last `seconds` of frames, kept as JPEG bytes: 1080p RGBA is 8 MB per
+ * frame, the same frame as JPEG is around 150 KB.
  */
 class FlxReplay implements FrameSink
 {

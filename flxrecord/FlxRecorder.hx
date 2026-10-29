@@ -8,11 +8,8 @@ import openfl.geom.Matrix;
 import openfl.geom.Rectangle;
 
 /**
- * Captures the game's rendered frames at a fixed output rate and hands them to a `FrameSink`.
- *
- * Recording is driven by `FlxG.signals.postDraw`, so the captured image is exactly what the
- * player saw this frame — HUD, shaders, camera fades included. The output rate is independent
- * from the game's framerate: a 240 fps game can be recorded at 30 fps without dropping logic.
+ * Copies `FlxG.signals.postDraw` into a `FrameSink` at an output rate independent of the
+ * game's framerate. The copy holds the camera canvas, HUD and shader output included.
  */
 class FlxRecorder
 {
